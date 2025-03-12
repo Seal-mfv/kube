@@ -4,8 +4,6 @@ kind: Kustomization
 resources:
   - ../../base
 
-namespace: dev
-
 commonLabels:
   environment: dev
 
