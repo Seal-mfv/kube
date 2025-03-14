@@ -15,12 +15,12 @@ type Response struct {
 func main() {
 	version := os.Getenv("APP_VERSION")
 	if version == "" {
-		version = "1.0.0"
+		version = "1.0.1"
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		response := Response{
-			Message: "Hello from Kubernetes!",
+			Message: "Hello from Kubernetes 2!",
 			Version: version,
 		}
 		w.Header().Set("Content-Type", "application/json")

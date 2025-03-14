@@ -30,7 +30,7 @@ This repository contains a simple Hello API service deployed using various Kuber
 
 ```bash
 cd api
-docker build -t hello-api:1.0.0 .
+docker build -t hello-api:1.0.1 .
 ```
 
 ## Deploying with Helm
