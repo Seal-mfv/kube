@@ -12,6 +12,19 @@ type Response struct {
 	Version string `json:"version"`
 }
 
+// GetMessage returns a simple greeting message
+func GetMessage() string {
+	return "Hello from Kubernetes 2!"
+}
+
+// createResponse creates a Response struct with the given message and version
+func createResponse(message, version string) Response {
+	return Response{
+		Message: message,
+		Version: version,
+	}
+}
+
 func main() {
 	version := os.Getenv("APP_VERSION")
 	if version == "" {
@@ -19,12 +32,12 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		response := Response{
-			Message: "Hello from Kubernetes 2!",
-			Version: version,
-		}
+		response := createResponse(GetMessage(), version)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		err := json.NewEncoder(w).Encode(response)
+		if err != nil {
+			log.Printf("Error encoding response: %v", err)
+		}
 	})
 
 	port := os.Getenv("PORT")

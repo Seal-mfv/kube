@@ -1,6 +1,9 @@
-export GOBIN := $(PWD)/bin
+export GOBIN := $(abspath bin)
 export PATH := $(GOBIN):$(shell printenv PATH)
 export GOPRIVATE := github.com/moneyforward
+
+export GOBIN
+export PATH
 
 install-modules:
 	go mod tidy
@@ -10,10 +13,10 @@ install-tools:
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
 lint:
-	@golangci-lint run ./...
+	@$(GOBIN)/golangci-lint run ./...
 
 ut:
-	@go test -short ./...
+	@go test ./...
 
 .PHONY: docker-compose-up
 docker-compose-up:
