@@ -1,0 +1,213 @@
+version: 2.1
+
+orbs:
+  slack: circleci/slack@5.1.1
+  aws-cli: circleci/aws-cli@5.4.1
+  aws-ecr: circleci/aws-ecr@9.5.4
+  pr-create-bot: moneyforward/pr-create-bot@3.0.5
+
+executors:
+  default:
+    working_directory: "~/golang-backend-boilerplate" # You have to set your own service name
+    docker:
+      - image: cimg/go:1.24.1
+    resource_class: medium
+  build:
+    working_directory: "~/golang-backend-boilerplate" # You have to set your own service name
+    machine:
+      image: ubuntu-2204:2024.01.2
+      docker_layer_caching: true
+    resource_class: medium
+
+# Define reusable values.
+anchors:
+  # It's a step to notify on Slack when the pipeline fails on the `main` branch.
+  notify_failure_on_main_branch: &notify_failure_on_main_branch
+    when:
+      condition:
+        equal: [main, << pipeline.git.branch >>]
+      steps:
+        - slack/notify:
+            event: fail
+            mentions: "@golang-backend-boilerplate_devs" # You have to set your own service name
+
+jobs:
+  noop:
+    executor: default
+    steps:
+      - run:
+          name: Noop
+          command: echo "Noop"
+  lint:
+    executor: default
+    steps:
+      - checkout
+      - run:
+          name: install dependencies
+          command: make install-modules
+      - run:
+          name: install tools
+          command: make install-tools
+      - run:
+          name: Run linter
+          command: make lint
+      - <<: *notify_failure_on_main_branch
+  ut:
+    executor: default
+    steps:
+      - checkout
+      # Need it to use testcontainers.
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: install dependencies
+          command: make install-modules
+      - run:
+          name: Run unit test
+          command: make ut
+      - <<: *notify_failure_on_main_branch
+  docker-build-and-push:
+    executor: build
+    parameters:
+      repo:
+        description: "name of the ECR repo to push to"
+        type: string
+      dockerfile:
+        description: "Path of the dockerfile to build, relative to the working directory"
+        type: string
+    steps:
+      - aws-ecr/build_and_push_image:
+          account_id: ${AWS_ACCOUNT}
+          auth:
+            - aws-cli/setup:
+                profile_name: "OIDC_PROFILE"
+                role_arn: $AWS_ROLE_ARN
+                session_duration: "1800"
+          path: << parameters.dockerfile >>
+          repo: << parameters.repo >>
+          extra_build_args: "--provenance=false"
+          profile_name: "OIDC_PROFILE"
+          tag: ${CIRCLE_BRANCH}-${CIRCLE_SHA1}
+      - <<: *notify_failure_on_main_branch
+  branch_test:
+    executor: default
+    environment:
+      TEST_RESULTS_DIR: /tmp/test_results
+    steps:
+      - checkout
+      # Need it to use testcontainers.
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: Run test for coverage
+          command: |
+            go install github.com/rillig/gobco@v1.3.4
+            if [[ "${CIRCLE_BRANCH}" == main ]]; then
+                ./scripts/branch-test.sh all "${TEST_RESULTS_DIR}"
+            elif [[ -n "${CI_PULL_REQUEST}" ]]; then
+                ./scripts/branch-test.sh pr "${TEST_RESULTS_DIR}"
+            else
+                echo "Not a target for SonarQube analysis."
+                mkdir -p "${TEST_RESULTS_DIR}"
+                touch "${TEST_RESULTS_DIR}/branch-coverage.xml"
+            fi
+      - persist_to_workspace:
+          root: /tmp/test_results
+          paths:
+            - branch-coverage.xml
+      - store_artifacts:
+          path: /tmp/test_results
+  sonarqube_analysis:
+    resource_class: large
+    docker:
+      - image: sonarsource/sonar-scanner-cli:11.3
+    environment:
+      TEST_RESULTS_DIR: /tmp/test_results
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/test_results
+      - run:
+          name: Update properties to upload coverage report
+          command: |
+            if [[ -f "${TEST_RESULTS_DIR}/branch-coverage.xml" ]]; then
+              echo "sonar.coverageReportPaths=${TEST_RESULTS_DIR}/branch-coverage.xml" >> ./sonar-project.properties
+            fi
+      - run:
+          name: Run SonarQube Analysis
+          command: |
+            if [[ "${CIRCLE_BRANCH}" == main ]]; then
+                # Only run full code SonarQube analysis on main branch
+                sonar-scanner \
+                  -Dsonar.host.url=${SONAR_HOST_URL} \
+                  -Dsonar.branch.name=${CIRCLE_BRANCH}
+            elif [[ -n "${CI_PULL_REQUEST}" ]]; then
+                # Only run SonarQube analysis on branches that has a PR
+                sonar-scanner \
+                    -Dsonar.host.url=${SONAR_HOST_URL} \
+                    -Dsonar.pullrequest.branch=${CIRCLE_BRANCH} \
+                    -Dsonar.pullrequest.base=main \
+                    -Dsonar.pullrequest.key=${CI_PULL_REQUEST#https://github.com/moneyforward/golang-backend-boilerplate/pull/} # You have to set your own service name
+            else
+                echo "Not a target for SonarQube analysis."
+            fi
+
+workflows:
+  test:
+    jobs:
+      - lint
+      - ut
+      - docker-build-and-push:
+          name: docker-build-and-push-office-http # You have to set your own service name
+          requires:
+            - lint
+            - ut
+          filters:
+            branches:
+              only:
+                - main
+          repo: golang-backend-boilerplate-office-http # You have to set your own service name
+          dockerfile: deploy/dockerfile/Dockerfile
+      - pr-create-bot/service-platform-create-pull-request:
+          name: pr-create-bot-for-stg
+          requires:
+            - docker-build-and-push-office-http
+          context:
+            - service-platform-create-pull-request
+          git_repository_name: k8s-service-manifests
+          service_name: golang-backend-boilerplate # You have to set your own service name
+          env: stg
+          is_multi_update: true
+          image_name: golang-backend-boilerplate-office-http # You have to set your own service name
+          image_tag_prefix: ${CIRCLE_BRANCH}
+          commit_hash: ${CIRCLE_SHA1}
+          slack_channel: golang-backend-boilerplate_notification # You have to set your own service name
+          enabled_force_push: true
+          automerge: true
+      - pr-create-bot/service-platform-create-pull-request:
+          name: pr-create-bot-for-prod
+          filters:
+            tags:
+              only: /release-.*/
+            branches:
+              ignore: /.*/
+          context:
+            - service-platform-create-pull-request
+          git_repository_name: k8s-service-manifests
+          service_name: golang-backend-boilerplate # You have to set your own service name
+          env: prod
+          is_multi_update: true
+          image_name: golang-backend-boilerplate-office-http # You have to set your own service name
+          image_tag_prefix: main # Git tag does not have a branch name, so specify the branch name here. It's better to be empty, but it's not available.
+          commit_hash: ${CIRCLE_SHA1}
+          slack_channel: golang-backend-boilerplate_notification # You have to set your own service name
+          enabled_force_push: true
+  sonarqube:
+    jobs:
+      - branch_test
+      - sonarqube_analysis:
+          requires:
+            - branch_test
+          filters:
+            branches:
+              ignore: /^dependabot\/.*/

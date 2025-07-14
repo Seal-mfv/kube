@@ -1,0 +1,51 @@
+secrets:
+  github-pat:
+    environment: GITHUB_PAT
+
+services:
+  office-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: boilerplate
+    ports:
+      - 3306:3306
+    volumes:
+      - office-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  office-http:
+    build:
+      context: ..
+      dockerfile: deploy/dockerfile/Dockerfile
+      args:
+        APP_NAME: server
+      secrets:
+        - github-pat
+    ports:
+      - 8080:8080
+    environment:
+      HTTP_SERVER_PORT: 8080
+      DB_DRIVER: mysql
+      DB_HOST: office-db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_NAME: boilerplate
+    depends_on:
+      office-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  office-db-data:
