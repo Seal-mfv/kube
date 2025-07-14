@@ -4,7 +4,6 @@ orbs:
   slack: circleci/slack@5.1.1
   aws-cli: circleci/aws-cli@5.4.1
   aws-ecr: circleci/aws-ecr@9.5.4
-  pr-create-bot: moneyforward/pr-create-bot@3.0.5
 
 executors:
   default:
