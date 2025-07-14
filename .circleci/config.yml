@@ -167,40 +167,7 @@ workflows:
                 - main
           repo: golang-backend-boilerplate-office-http # You have to set your own service name
           dockerfile: deploy/dockerfile/Dockerfile
-      - pr-create-bot/service-platform-create-pull-request:
-          name: pr-create-bot-for-stg
-          requires:
-            - docker-build-and-push-office-http
-          context:
-            - service-platform-create-pull-request
-          git_repository_name: k8s-service-manifests
-          service_name: golang-backend-boilerplate # You have to set your own service name
-          env: stg
-          is_multi_update: true
-          image_name: golang-backend-boilerplate-office-http # You have to set your own service name
-          image_tag_prefix: ${CIRCLE_BRANCH}
-          commit_hash: ${CIRCLE_SHA1}
-          slack_channel: golang-backend-boilerplate_notification # You have to set your own service name
-          enabled_force_push: true
-          automerge: true
-      - pr-create-bot/service-platform-create-pull-request:
-          name: pr-create-bot-for-prod
-          filters:
-            tags:
-              only: /release-.*/
-            branches:
-              ignore: /.*/
-          context:
-            - service-platform-create-pull-request
-          git_repository_name: k8s-service-manifests
-          service_name: golang-backend-boilerplate # You have to set your own service name
-          env: prod
-          is_multi_update: true
-          image_name: golang-backend-boilerplate-office-http # You have to set your own service name
-          image_tag_prefix: main # Git tag does not have a branch name, so specify the branch name here. It's better to be empty, but it's not available.
-          commit_hash: ${CIRCLE_SHA1}
-          slack_channel: golang-backend-boilerplate_notification # You have to set your own service name
-          enabled_force_push: true
+
   sonarqube:
     jobs:
       - branch_test
