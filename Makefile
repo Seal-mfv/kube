@@ -1,6 +1,3 @@
-include .build.env
-export
-
 export GOBIN := $(PWD)/bin
 export PATH := $(GOBIN):$(shell printenv PATH)
 export GOPRIVATE := github.com/moneyforward
