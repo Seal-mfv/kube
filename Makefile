@@ -7,7 +7,7 @@ install-modules:
 
 install-tools:
 	mkdir -p $(GOBIN)
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.2.2
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
 lint:
 	@golangci-lint run ./...
