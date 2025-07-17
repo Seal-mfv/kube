@@ -1,26 +1,30 @@
 version: 2.1
 
+# You have to set the following Environment Variables from Project Settings on Circle CI
+# - SONAR_HOST_URL (e.g. https://sonar.mfvn.dev/)
+# - SONAR_TOKEN
+
 orbs:
   slack: circleci/slack@5.1.1
   aws-cli: circleci/aws-cli@5.4.1
   aws-ecr: circleci/aws-ecr@9.5.4
 
 executors:
-  default:
+  go-docker:
     working_directory: "~/golang-backend-boilerplate" # You have to set your own service name
     docker:
       - image: cimg/go:1.24.1
     resource_class: medium
-  build:
+  machine-docker:
     working_directory: "~/golang-backend-boilerplate" # You have to set your own service name
     machine:
-      image: ubuntu-2204:2024.01.2
+      image: ubuntu-2204:current
       docker_layer_caching: true
     resource_class: medium
 
 # Define reusable values.
 anchors:
-  # It's a step to notify on Slack when the pipeline fails on the `main` branch.
+  # This step notifies Slack when the pipeline fails on the `main` branch.
   notify_failure_on_main_branch: &notify_failure_on_main_branch
     when:
       condition:
@@ -28,17 +32,17 @@ anchors:
       steps:
         - slack/notify:
             event: fail
-            mentions: "@golang-backend-boilerplate_devs" # You have to set your own service name
+            mentions: "@golang-backend-boilerplate_devs" # Update this to your Slack team's username
 
 jobs:
   noop:
-    executor: default
+    executor: go-docker
     steps:
       - run:
           name: Noop
           command: echo "Noop"
   lint:
-    executor: default
+    executor: go-docker
     steps:
       - checkout
       - run:
@@ -52,10 +56,10 @@ jobs:
           command: make lint
       - <<: *notify_failure_on_main_branch
   ut:
-    executor: default
+    executor: go-docker
     steps:
       - checkout
-      # Need it to use testcontainers.
+      # Needed to use testcontainers
       - setup_remote_docker:
           docker_layer_caching: true
       - run:
@@ -66,35 +70,48 @@ jobs:
           command: make ut
       - <<: *notify_failure_on_main_branch
   docker-build-and-push:
-    executor: build
+    executor: machine-docker
     parameters:
-      repo:
-        description: "name of the ECR repo to push to"
+      aws-account:
         type: string
+        default: ${AWS_ACCOUNT}
+      aws-role-arn:
+        type: string
+        default: ${AWS_ROLE_ARN}
+      aws-region:
+        type: string
+        default: ${AWS_DEFAULT_REGION}
+      image-name:
+        description: "Name of the image and ECR repository to push the Docker image to"
+        type: string
+        default: ${CIRCLE_PROJECT_REPONAME}
+      image-tag:
+        description: "Docker image tag, typically based on branch and commit SHA"
+        type: string
+        default: ${CIRCLE_BRANCH}-${CIRCLE_SHA1}
       dockerfile:
-        description: "Path of the dockerfile to build, relative to the working directory"
+        description: "Relative path to the Dockerfile from the working directory"
         type: string
     steps:
+      - aws-cli/setup:
+          role_arn: << parameters.aws-role-arn >>
+          role_session_name: docker-build-and-push
+      - aws-ecr/ecr_login:
+          account_id: << parameters.aws-account >>
       - aws-ecr/build_and_push_image:
-          account_id: ${AWS_ACCOUNT}
-          auth:
-            - aws-cli/setup:
-                profile_name: "OIDC_PROFILE"
-                role_arn: $AWS_ROLE_ARN
-                session_duration: "1800"
+          account_id: << parameters.aws-account >>
           path: << parameters.dockerfile >>
-          repo: << parameters.repo >>
+          repo: << parameters.image-name >>
           extra_build_args: "--provenance=false"
-          profile_name: "OIDC_PROFILE"
-          tag: ${CIRCLE_BRANCH}-${CIRCLE_SHA1}
+          tag: << parameters.image-tag >>
       - <<: *notify_failure_on_main_branch
   branch_test:
-    executor: default
+    executor: go-docker
     environment:
       TEST_RESULTS_DIR: /tmp/test_results
     steps:
       - checkout
-      # Need it to use testcontainers.
+      # Needed to use testcontainers
       - setup_remote_docker:
           docker_layer_caching: true
       - run:
@@ -141,7 +158,7 @@ jobs:
                   -Dsonar.host.url=${SONAR_HOST_URL} \
                   -Dsonar.branch.name=${CIRCLE_BRANCH}
             elif [[ -n "${CI_PULL_REQUEST}" ]]; then
-                # Only run SonarQube analysis on branches that has a PR
+                # Only run SonarQube analysis on branches that have a PR
                 sonar-scanner \
                     -Dsonar.host.url=${SONAR_HOST_URL} \
                     -Dsonar.pullrequest.branch=${CIRCLE_BRANCH} \
@@ -152,12 +169,22 @@ jobs:
             fi
 
 workflows:
-  test:
+  build:
     jobs:
       - lint
       - ut
       - docker-build-and-push:
-          name: docker-build-and-push-office-http # You have to set your own service name
+          name: golang-backend-boilerplate-office # You have to set your own name
+          image-name: golang-backend-boilerplate # You have to set your own repo
+          image-tag: ${CIRCLE_BRANCH}${CIRCLE_TAG:+-${CIRCLE_TAG}}-${CIRCLE_SHA1}
+          dockerfile: deploy/dockerfile
+          context:
+            - github_developer_read_packages
+            # Set your own deploy-role context
+            # - AWS_ACCOUNT (e.g. 202732020874)
+            # - AWS_DEFAULT_REGION (e.g. ap-northeast-1)
+            # - AWS_ROLE_ARN (e.g. arn:aws:iam::757836524150:role/deploy/deploy-role-<project>)
+            # - deploy-role-golang-backend-boilerplate
           requires:
             - lint
             - ut
@@ -165,9 +192,6 @@ workflows:
             branches:
               only:
                 - main
-          repo: golang-backend-boilerplate-office-http # You have to set your own service name
-          dockerfile: deploy/dockerfile/Dockerfile
-
   sonarqube:
     jobs:
       - branch_test

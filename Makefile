@@ -2,9 +2,6 @@ export GOBIN := $(abspath bin)
 export PATH := $(GOBIN):$(shell printenv PATH)
 export GOPRIVATE := github.com/moneyforward
 
-export GOBIN
-export PATH
-
 install-modules:
 	go mod tidy
 
