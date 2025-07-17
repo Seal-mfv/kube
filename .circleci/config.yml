@@ -93,17 +93,18 @@ jobs:
         description: "Relative path to the Dockerfile from the working directory"
         type: string
     steps:
-      - aws-cli/setup:
-          role_arn: << parameters.aws-role-arn >>
-          role_session_name: docker-build-and-push
-      - aws-ecr/ecr_login:
-          account_id: << parameters.aws-account >>
       - aws-ecr/build_and_push_image:
           account_id: << parameters.aws-account >>
+          auth:
+            - aws-cli/setup:
+                profile_name: "OIDC_PROFILE"
+                role_arn: $AWS_ROLE_ARN
+                session_duration: "1800"
           path: << parameters.dockerfile >>
           repo: << parameters.image-name >>
           extra_build_args: "--provenance=false"
           tag: << parameters.image-tag >>
+          profile_name: "OIDC_PROFILE"
       - <<: *notify_failure_on_main_branch
   branch_test:
     executor: go-docker
